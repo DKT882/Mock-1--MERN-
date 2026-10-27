@@ -1,18 +1,11 @@
 import mongoose from 'mongoose';
-import { nanoid } from 'nanoid';
 
 const validateEmail = function(email) {
-    const re = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
 };
 
 const bookingSchema = new mongoose.Schema({
-    id: {
-        type: String,
-        required: true,
-        default: () => nanoid(7),
-        unique: true
-    },
     eventId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Event',

@@ -1,13 +1,6 @@
 import mongoose from 'mongoose';
-import { nanoid } from 'nanoid';
 
 const eventSchema = new mongoose.Schema({
-    id: {
-        type: String,
-        required: true,
-        default: () => nanoid(7),
-        unique: true,
-    },
     title: {
         type: String,
         required: [true, "Title is required"],
@@ -25,7 +18,7 @@ const eventSchema = new mongoose.Schema({
         required: [true, "Date is required"],
         validate: {
             validator: function(value) {
-                return value >= new Date().setHours(0, 0, 0, 0);
+                return value >= new Date().setUTCHours(0, 0, 0, 0);
             },
             message: "Date cannot be in the past"
         }
@@ -48,7 +41,7 @@ const eventSchema = new mongoose.Schema({
         }
     }
 }, {
-    timestamps: true 
+    timestamps: true
 });
 
 const Event = mongoose.model("Event", eventSchema);

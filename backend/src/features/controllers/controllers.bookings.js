@@ -1,143 +1,122 @@
-import Event from '../schemas/schema.events.js';
+import Booking from '../schemas/schema.bookings.js'
+import Event from '../schemas/schema.events.js'
+
+const formatEvent = (event) => ({
+    id: event.id,
+    title: event.title,
+    venue: event.venue,
+    date: event.date.toISOString().split('T')[0],
+    totalSeats: event.totalseats,
+    availSeats: event.availseats
+})
 
 export const createEvent = async (req, res) => {
     try {
-        const { title, venue, date, totalSeats } = req.body;
+        const { title, venue, date, totalSeats } = req.body
         if (!title || !venue || !date || totalSeats === undefined) {
             return res.status(400).json({
                 success: false,
-                message: "Validation failed: title, venue, date, and totalSeats are required fields."
-            });
+                message: 'Title, venue, date, and total seats are required.'
+            })
         }
 
-        const parsedDate = new Date(date);
-        if (isNaN(parsedDate.getTime())) {
-            return res.status(400).json({ success: false, message: "Invalid date format." });
-        }
-        
-        const today = new Date().setHours(0, 0, 0, 0);
-        if (parsedDate < today) {
-            return res.status(400).json({ success: false, message: "Date cannot be in the past" });
-        }
-
-        const newEvent = new Event({
+        const event = await Event.create({
             title,
             venue,
-            date: parsedDate,
-            totalseats: totalSeats,
-            });
-
-        await newEvent.save();
+            date,
+            totalseats: totalSeats
+        })
 
         return res.status(201).json({
             success: true,
-            message: "event created successfully",
-            data: {
-                id: newEvent.id,
-                title: newEvent.title,
-                venue: newEvent.venue,
-                date: newEvent.date.toISOString().split('T')[0],
-                totalSeats: newEvent.totalseats,
-                availSeats: newEvent.availseats
-            }
-        });
-
+            message: 'Event created successfully.',
+            data: formatEvent(event)
+        })
     } catch (error) {
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(val => val.message);
-            return res.status(400).json({
-                success: false,
-                message: `Validation failed: ${messages.join(', ')}`
-            });
+        if (error.name === 'ValidationError' || error.name === 'CastError') {
+            const message = error.name === 'ValidationError'
+                ? Object.values(error.errors).map((validationError) => validationError.message).join(', ')
+                : 'Please enter valid event details.'
+            return res.status(400).json({ success: false, message })
         }
-        return res.status(500).json({ success: false, message: "Internal server error" });
+        console.error('Could not create event:', error)
+        return res.status(500).json({ success: false, message: 'Could not create event.' })
     }
-};
+}
 
 export const getEvents = async (req, res) => {
     try {
-        const { search } = req.query;
-        let queryFilter = {};
-
-        if (search) {
-            queryFilter = {
-                $or: [
-                    { title: { $regex: search, $options: 'i' } },
-                    { venue: { $regex: search, $options: 'i' } }
-                ]
-            };
+        const filter = {}
+        if (typeof req.query.search === 'string' && req.query.search.trim()) {
+            const search = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            filter.$or = [
+                { title: { $regex: search, $options: 'i' } },
+                { venue: { $regex: search, $options: 'i' } }
+            ]
         }
 
-        const events = await Event.find(queryFilter).sort({ date: 1 });
-        
-        const formattedData = events.map(event => ({
-            id: event.id,
-            title: event.title,
-            venue: event.venue,
-            date: event.date.toISOString().split('T')[0],
-            totalSeats: event.totalseats,
-            availSeats: event.availseats
-        }));
-
+        const events = await Event.find(filter).sort({ date: 1 })
         return res.status(200).json({
             success: true,
-            data: formattedData
-        });
-
+            data: events.map(formatEvent)
+        })
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Internal server error" });
+        console.error('Could not get events:', error)
+        return res.status(500).json({ success: false, message: 'Could not get events.' })
     }
-};
+}
+
 export const bookTicket = async (req, res) => {
     try {
-        const { title, venue, date, totalSeats } = req.body;
-        if (!title || !venue || !date || totalSeats === undefined) {
+        const { attendeeName, email, seats } = req.body
+        if (!attendeeName?.trim() || !email?.trim() || !Number.isInteger(seats) || seats < 1 || seats > 5) {
             return res.status(400).json({
                 success: false,
-                message: "Validation failed: title, venue, date, and totalSeats are required fields."
-            });
+                message: 'Enter your name, a valid email, and a ticket quantity between 1 and 5.'
+            })
         }
 
-        const parsedDate = new Date(date);
-        if (isNaN(parsedDate.getTime())) {
-            return res.status(400).json({ success: false, message: "Invalid date format." });
+        const event = await Event.findOneAndUpdate(
+            { _id: req.params.id, availseats: { $gte: seats } },
+            { $inc: { availseats: -seats } },
+            { new: true, runValidators: true, timestamps: false }
+        )
+
+        if (!event) {
+            const exists = await Event.exists({ _id: req.params.id })
+            return exists
+                ? res.status(400).json({ success: false, message: 'Not enough seats left.' })
+                : res.status(404).json({ success: false, message: 'Event not found.' })
         }
-        
-        const today = new Date().setHours(0, 0, 0, 0);
-        if (parsedDate < today) {
-            return res.status(400).json({ success: false, message: "Date cannot be in the past" });
+
+        try {
+            const booking = await Booking.create({
+                eventId: event._id,
+                attendeeName: attendeeName.trim(),
+                email: email.trim(),
+                seats
+            })
+
+            return res.status(201).json({
+                success: true,
+                message: 'Tickets booked successfully.',
+                data: {
+                    id: booking.id,
+                    eventId: event.id,
+                    attendeeName: booking.attendeeName,
+                    email: booking.email,
+                    seats: booking.seats
+                }
+            })
+        } catch (error) {
+            await Event.findByIdAndUpdate(event._id, { $inc: { availseats: seats } })
+            throw error
         }
-
-        const newEvent = new Event({
-            title,
-            venue,
-            date: parsedDate,
-            totalseats: totalSeats,
-            });
-
-        await newEvent.save();
-
-        return res.status(201).json({
-            success: true,
-            message: "event created successfully",
-            data: {
-                id: newEvent.id,
-                title: newEvent.title,
-                venue: newEvent.venue,
-                date: newEvent.date.toISOString().split('T')[0],
-                totalSeats: newEvent.totalseats,
-                availSeats: newEvent.availseats
-            }
-        });
-
     } catch (error) {
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(val => val.message);
-            return res.status(400).json({
-                success: false,
-                message: `Validation failed: ${messages.join(', ')}`
-            });
+        if (error.name === 'ValidationError' || error.name === 'CastError') {
+            return res.status(400).json({ success: false, message: 'Please enter valid booking details.' })
         }
-        return res.status(500).json({ success: false, message: "Internal server error" });
+        console.error('Could not book tickets:', error)
+        return res.status(500).json({ success: false, message: 'Could not book tickets.' })
     }
 }
